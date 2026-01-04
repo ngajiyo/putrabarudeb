@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manager Piutang Pro v5.4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-card { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen pb-20">
+
+    <div class="bg-indigo-700 text-white sticky top-0 z-20 shadow-xl">
+        <div class="p-6">
+            <h1 class="text-sm font-medium opacity-70 uppercase tracking-widest">Total Sisa Piutang</h1>
+            <p id="total-sisa" class="text-3xl font-black mt-1 font-mono">Rp 0</p>
+        </div>
+        <div class="flex bg-indigo-900/40 backdrop-blur-md p-1 mx-4 mb-4 rounded-xl border border-white/10">
+            <button onclick="switchTab('hutang')" id="tab-hutang" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition-all bg-white text-indigo-700 shadow">Hutang Aktif</button>
+            <button onclick="switchTab('log')" id="tab-log" class="flex-1 py-2.5 text-sm font-bold rounded-lg transition-all text-white opacity-60">Riwayat Log</button>
+        </div>
+    </div>
+
+    <div id="main-content" class="p-4 space-y-3"></div>
+
+    <div id="modal-edit" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 shadow-2xl animate-card">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="modal-title" class="text-xl font-black text-slate-800 uppercase truncate pr-4">Nama Debitur</h2>
+                <span id="modal-mode-badge" class="text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest">MODE</span>
+            </div>
+            <div class="space-y-4">
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nominal (Rp)</label>
+                    <input type="number" id="input-bayar" class="w-full bg-transparent text-2xl font-black outline-none text-indigo-600" placeholder="0">
+                </div>
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Keterangan</label>
+                    <input type="text" id="input-keterangan" class="w-full bg-transparent text-sm font-medium outline-none text-slate-600" placeholder="Catatan">
+                </div>
+            </div>
+            <div class="flex gap-3 mt-8">
+                <button onclick="tutupModal('modal-edit')" class="flex-1 py-4 bg-slate-100 rounded-xl font-bold text-slate-500">Batal</button>
+                <button id="btn-simpan" onclick="simpanTransaksi()" class="flex-1 py-4 rounded-xl font-bold text-white shadow-lg">Simpan</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-tempo" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 shadow-2xl animate-card">
+            <h2 id="tempo-title" class="text-xl font-black text-slate-800 uppercase text-center mb-6">Ubah Jatuh Tempo</h2>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <input type="date" id="input-tempo" class="w-full bg-transparent text-xl font-bold outline-none text-indigo-600 mt-1">
+            </div>
+            <div class="flex gap-3 mt-8">
+                <button onclick="tutupModal('modal-tempo')" class="flex-1 py-4 bg-slate-100 rounded-xl font-bold text-slate-500">Batal</button>
+                <button onclick="updateTempo()" class="flex-1 py-4 bg-indigo-600 rounded-xl font-bold text-white shadow-lg">Update Tempo</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SB_URL = 'https://pfichwnfffjzibusofao.supabase.co';
+        const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmaWNod25mZmZqemlidXNvZmFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4MzE0NjIsImV4cCI6MjA4MTQwNzQ2Mn0.Hp9nGeQEiNXnKoPkeSY2Qoey0HP2Er0E4TbwBe_y64c';
+        const client = supabase.createClient(SB_URL, SB_KEY);
+
+        let selId = null, selSisa = 0, mode = 'bayar';
+
+        function switchTab(t) {
+            document.getElementById('tab-hutang').className = t === 'hutang' ? "flex-1 py-2.5 text-sm font-bold rounded-lg bg-white text-indigo-700 shadow" : "flex-1 py-2.5 text-sm font-bold rounded-lg text-white opacity-60";
+            document.getElementById('tab-log').className = t === 'log' ? "flex-1 py-2.5 text-sm font-bold rounded-lg bg-white text-indigo-700 shadow" : "flex-1 py-2.5 text-sm font-bold rounded-lg text-white opacity-60";
+            t === 'hutang' ? loadHutang() : loadLogs();
+        }
+
+        async function loadHutang() {
+            const container = document.getElementById('main-content');
+            container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat...</p>';
+            const { data } = await client.from('daftar_piutang').select('*').order('nama_debitur');
+            data.sort((a, b) => (b.sisa_hutang > 0) - (a.sisa_hutang > 0));
+            const today = new Date(); today.setHours(0,0,0,0);
+            let total = 0; container.innerHTML = '';
+
+            data.forEach(row => {
+                const isLunas = row.sisa_hutang <= 0;
+                if(!isLunas) total += row.sisa_hutang;
+                const tglDisplay = row.jatuh_tempo ? new Date(row.jatuh_tempo).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'}) : 'Belum Atur';
+                
+                let statusTempo = "";
+                if(row.jatuh_tempo && !isLunas) {
+                    const diffDays = Math.ceil((new Date(row.jatuh_tempo).setHours(0,0,0,0) - today) / (1000*60*60*24));
+                    statusTempo = diffDays < 0 ? `<span class="text-red-600 font-black">[ Lewat ${Math.abs(diffDays)} h ]</span>` : (diffDays === 0 ? `<span class="text-orange-600 font-black">[ HARI INI ]</span>` : `<span class="text-blue-500">[ ${diffDays} h lagi ]</span>`);
+                }
+
+                container.innerHTML += `
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center animate-card ${isLunas ? 'opacity-50 grayscale bg-slate-50' : ''}">
+                        <div class="max-w-[55%]">
+                            <p class="font-bold text-slate-800 truncate uppercase tracking-tighter leading-tight">${row.nama_debitur}</p>
+                            <p class="${isLunas ? 'text-slate-400' : 'text-red-500'} font-black italic">${isLunas ? 'LUNAS' : 'Rp '+row.sisa_hutang.toLocaleString('id-ID')}</p>
+                            <div class="text-[9px] font-bold uppercase mt-1 tracking-tight text-slate-400">Tempo: ${tglDisplay} ${statusTempo}</div>
+                        </div>
+                        <div class="flex gap-2">
+                            ${!isLunas ? `
+                                <button onclick="bukaTempo('${row.id}', '${row.nama_debitur}', '${row.jatuh_tempo || ''}')" class="bg-slate-100 text-slate-500 p-3 rounded-xl active:scale-90 transition-all">📅</button>
+                                <button onclick="bukaModal('${row.id}', '${row.nama_debitur}', ${row.sisa_hutang}, 'bayar')" class="bg-indigo-600 text-white px-5 py-3 rounded-xl text-xs font-black shadow-md active:scale-90 uppercase">Bayar</button>
+                            ` : `
+                                <button onclick="bukaModal('${row.id}', '${row.nama_debitur}', 0, 'tambah')" class="bg-emerald-500 text-white px-4 py-3 rounded-xl text-xs font-black shadow-md active:scale-90 flex items-center gap-1">
+                                    <span class="text-lg leading-none">+</span> HUTANG
+                                </button>
+                            `}
+                        </div>
+                    </div>`;
+            });
+            document.getElementById('total-sisa').innerText = `Rp ${total.toLocaleString('id-ID')}`;
+        }
+
+        function bukaModal(id, nama, sisa, m) {
+            selId = id; selSisa = sisa; mode = m;
+            document.getElementById('modal-title').innerText = nama;
+            const badge = document.getElementById('modal-mode-badge');
+            const btn = document.getElementById('btn-simpan');
+            
+            if(m === 'bayar') {
+                badge.innerText = "PEMBAYARAN";
+                badge.className = "text-[10px] px-3 py-1 rounded-full font-black bg-emerald-100 text-emerald-700 uppercase tracking-widest";
+                btn.className = "flex-1 py-4 bg-indigo-600 rounded-xl font-bold text-white shadow-lg active:scale-95";
+            } else {
+                badge.innerText = "TAMBAH HUTANG";
+                badge.className = "text-[10px] px-3 py-1 rounded-full font-black bg-red-100 text-red-700 uppercase tracking-widest";
+                btn.className = "flex-1 py-4 bg-red-600 rounded-xl font-bold text-white shadow-lg active:scale-95";
+            }
+            document.getElementById('modal-edit').classList.remove('hidden');
+        }
+
+        async function simpanTransaksi() {
+            const jml = parseInt(document.getElementById('input-bayar').value);
+            const ket = document.getElementById('input-keterangan').value;
+            if(!jml || jml <= 0) return alert("Nominal tidak valid!");
+
+            const nominalSimpan = mode === 'tambah' ? jml : jml;
+            const sisaBaru = mode === 'tambah' ? selSisa + jml : selSisa - jml;
+
+            await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: nominalSimpan, keterangan: ket, jenis_transaksi: mode }]);
+            await client.from('daftar_piutang').update({ sisa_hutang: sisaBaru }).eq('id', selId);
+            
+            tutupModal('modal-edit'); loadHutang();
+        }
+
+        async function loadLogs() {
+            const container = document.getElementById('main-content');
+            const { data } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('dibuat_pada', { ascending: false });
+            container.innerHTML = '';
+            data.forEach(log => {
+                const j = (log.jenis_transaksi || 'bayar').toLowerCase();
+                const config = {
+                    bayar: { c: 'border-emerald-500 bg-emerald-100 text-emerald-700', t: 'text-emerald-600', s: '+' },
+                    tambah: { c: 'border-red-500 bg-red-100 text-red-700', t: 'text-red-600', s: '-' },
+                    perpanjang: { c: 'border-yellow-500 bg-yellow-100 text-yellow-700', t: 'text-yellow-600', s: '•' }
+                }[j] || { c: 'border-slate-500', t: 'text-slate-600', s: '' };
+
+                container.innerHTML += `
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border-l-4 ${config.c.split(' ')[0]} flex justify-between items-center animate-card">
+                        <div class="max-w-[60%]">
+                            <div class="flex items-center gap-2">
+                                <p class="font-bold text-slate-800 uppercase text-xs truncate">${log.daftar_piutang?.nama_debitur || 'User'}</p>
+                                <span class="text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${config.c.split(' ').slice(1).join(' ')}">${j}</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400 italic truncate">${log.keterangan || '-'}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="${config.t} font-black text-sm">${config.s} Rp ${log.nominal.toLocaleString('id-ID')}</p>
+                            <p class="text-[9px] text-slate-300 font-bold">${new Date(log.dibuat_pada).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'})}</p>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        function tutupModal(id) { document.getElementById(id).value = ''; document.getElementById(id).classList.add('hidden'); }
+        function bukaTempo(id, nama, tglLama) {
+            selId = id; document.getElementById('tempo-title').innerText = nama;
+            const input = document.getElementById('input-tempo');
+            input.value = tglLama ? new Date(tglLama).toISOString().split('T')[0] : "";
+            document.getElementById('modal-tempo').classList.remove('hidden');
+        }
+        async function updateTempo() {
+            const tgl = document.getElementById('input-tempo').value;
+            if(!tgl) return alert("Pilih tanggal!");
+            await client.from('daftar_piutang').update({ jatuh_tempo: tgl }).eq('id', selId);
+            await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: 0, keterangan: 'Ubah Tempo ke ' + tgl, jenis_transaksi: 'perpanjang' }]);
+            tutupModal('modal-tempo'); loadHutang();
+        }
+
+        window.onload = loadHutang;
+    </script>
+</body>
+</html>
