@@ -67,7 +67,7 @@
         const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmaWNod25mZmZqemlidXNvZmFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4MzE0NjIsImV4cCI6MjA4MTQwNzQ2Mn0.Hp9nGeQEiNXnKoPkeSY2Qoey0HP2Er0E4TbwBe_y64c';
         const client = supabase.createClient(SB_URL, SB_KEY);
 
-        let selId = null, selSisa = 0, mode = 'bayar';
+        let selId = null, selSisa = 0, mode = 'bayar', allLogs = [];
 
         function switchTab(t) {
             document.getElementById('tab-hutang').className = t === 'hutang' ? "flex-1 py-2.5 text-sm font-bold rounded-lg bg-white text-indigo-700 shadow" : "flex-1 py-2.5 text-sm font-bold rounded-lg text-white opacity-60";
@@ -80,6 +80,7 @@
             container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat...</p>';
             const { data } = await client.from('daftar_piutang').select('*').order('nama_debitur');
             data.sort((a, b) => (b.sisa_hutang > 0) - (a.sisa_hutang > 0));
+            
             const today = new Date(); today.setHours(0,0,0,0);
             let total = 0; container.innerHTML = '';
 
@@ -116,6 +117,82 @@
             document.getElementById('total-sisa').innerText = `Rp ${total.toLocaleString('id-ID')}`;
         }
 
+        // --- FUNGSI FILTER LOG ---
+        async function loadLogs() {
+            const container = document.getElementById('main-content');
+            container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat Riwayat...</p>';
+            
+            const { data, error } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('dibuat_pada', { ascending: false });
+            if(error) return container.innerHTML = "Gagal memuat data.";
+            allLogs = data;
+
+            container.innerHTML = `
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3 mb-4 animate-card">
+                    <input type="text" id="f-nama" oninput="applyFilters()" placeholder="Cari nama debitur..." class="w-full p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                    <div class="flex gap-2">
+                        <div class="flex-1">
+                            <label class="text-[8px] font-bold text-slate-400 ml-1">MULAI</label>
+                            <input type="date" id="f-mulai" onchange="applyFilters()" class="w-full p-2 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[8px] font-bold text-slate-400 ml-1">SAMPAI</label>
+                            <input type="date" id="f-selesai" onchange="applyFilters()" class="w-full p-2 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                        </div>
+                    </div>
+                </div>
+                <div id="log-list" class="space-y-3"></div>
+            `;
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const nama = document.getElementById('f-nama').value.toLowerCase();
+            const mulai = document.getElementById('f-mulai').value;
+            const selesai = document.getElementById('f-selesai').value;
+
+            const filtered = allLogs.filter(log => {
+                const mNama = log.daftar_piutang?.nama_debitur.toLowerCase().includes(nama);
+                const tglLog = log.dibuat_pada.split('T')[0];
+                let mTgl = true;
+                if(mulai && selesai) mTgl = tglLog >= mulai && tglLog <= selesai;
+                else if(mulai) mTgl = tglLog >= mulai;
+                else if(selesai) mTgl = tglLog <= selesai;
+                return mNama && mTgl;
+            });
+            renderLogItems(filtered);
+        }
+
+        function renderLogItems(data) {
+            const list = document.getElementById('log-list');
+            if(data.length === 0) return list.innerHTML = '<p class="text-center py-10 text-slate-400 italic text-sm">Tidak ada riwayat</p>';
+            
+            list.innerHTML = '';
+            data.forEach(log => {
+                const j = (log.jenis_transaksi || 'bayar').toLowerCase();
+                const cfg = {
+                    bayar: { c: 'border-emerald-500 bg-emerald-100 text-emerald-700', t: 'text-emerald-600', s: '+' },
+                    tambah: { c: 'border-red-500 bg-red-100 text-red-700', t: 'text-red-600', s: '-' },
+                    perpanjang: { c: 'border-yellow-500 bg-yellow-100 text-yellow-700', t: 'text-yellow-600', s: '•' }
+                }[j] || { c: 'border-slate-500', t: 'text-slate-600', s: '' };
+
+                list.innerHTML += `
+                    <div class="bg-white p-4 rounded-2xl shadow-sm border-l-4 ${cfg.c.split(' ')[0]} flex justify-between items-center animate-card">
+                        <div class="max-w-[60%]">
+                            <div class="flex items-center gap-2">
+                                <p class="font-bold text-slate-800 uppercase text-xs truncate">${log.daftar_piutang?.nama_debitur || 'User'}</p>
+                                <span class="text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${cfg.c.split(' ').slice(1).join(' ')}">${j}</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400 italic truncate">${log.keterangan || '-'}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="${cfg.t} font-black text-sm">${cfg.s} Rp ${log.nominal.toLocaleString('id-ID')}</p>
+                            <p class="text-[9px] text-slate-300 font-bold">${new Date(log.dibuat_pada).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'})}</p>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        // --- MODAL & ACTION LOGIC ---
         function bukaModal(id, nama, sisa, m) {
             selId = id; selSisa = sisa; mode = m;
             document.getElementById('modal-title').innerText = nama;
@@ -138,58 +215,34 @@
             const jml = parseInt(document.getElementById('input-bayar').value);
             const ket = document.getElementById('input-keterangan').value;
             if(!jml || jml <= 0) return alert("Nominal tidak valid!");
-
-            const nominalSimpan = mode === 'tambah' ? jml : jml;
+            
             const sisaBaru = mode === 'tambah' ? selSisa + jml : selSisa - jml;
-
-            await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: nominalSimpan, keterangan: ket, jenis_transaksi: mode }]);
+            await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: jml, keterangan: ket, jenis_transaksi: mode }]);
             await client.from('daftar_piutang').update({ sisa_hutang: sisaBaru }).eq('id', selId);
             
             tutupModal('modal-edit'); loadHutang();
         }
 
-        async function loadLogs() {
-            const container = document.getElementById('main-content');
-            const { data } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('dibuat_pada', { ascending: false });
-            container.innerHTML = '';
-            data.forEach(log => {
-                const j = (log.jenis_transaksi || 'bayar').toLowerCase();
-                const config = {
-                    bayar: { c: 'border-emerald-500 bg-emerald-100 text-emerald-700', t: 'text-emerald-600', s: '+' },
-                    tambah: { c: 'border-red-500 bg-red-100 text-red-700', t: 'text-red-600', s: '-' },
-                    perpanjang: { c: 'border-yellow-500 bg-yellow-100 text-yellow-700', t: 'text-yellow-600', s: '•' }
-                }[j] || { c: 'border-slate-500', t: 'text-slate-600', s: '' };
-
-                container.innerHTML += `
-                    <div class="bg-white p-4 rounded-2xl shadow-sm border-l-4 ${config.c.split(' ')[0]} flex justify-between items-center animate-card">
-                        <div class="max-w-[60%]">
-                            <div class="flex items-center gap-2">
-                                <p class="font-bold text-slate-800 uppercase text-xs truncate">${log.daftar_piutang?.nama_debitur || 'User'}</p>
-                                <span class="text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${config.c.split(' ').slice(1).join(' ')}">${j}</span>
-                            </div>
-                            <p class="text-[10px] text-slate-400 italic truncate">${log.keterangan || '-'}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="${config.t} font-black text-sm">${config.s} Rp ${log.nominal.toLocaleString('id-ID')}</p>
-                            <p class="text-[9px] text-slate-300 font-bold">${new Date(log.dibuat_pada).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'})}</p>
-                        </div>
-                    </div>`;
-            });
-        }
-
-        function tutupModal(id) { document.getElementById(id).value = ''; document.getElementById(id).classList.add('hidden'); }
         function bukaTempo(id, nama, tglLama) {
             selId = id; document.getElementById('tempo-title').innerText = nama;
-            const input = document.getElementById('input-tempo');
-            input.value = tglLama ? new Date(tglLama).toISOString().split('T')[0] : "";
+            document.getElementById('input-tempo').value = tglLama ? tglLama : "";
             document.getElementById('modal-tempo').classList.remove('hidden');
         }
+
         async function updateTempo() {
             const tgl = document.getElementById('input-tempo').value;
             if(!tgl) return alert("Pilih tanggal!");
             await client.from('daftar_piutang').update({ jatuh_tempo: tgl }).eq('id', selId);
             await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: 0, keterangan: 'Ubah Tempo ke ' + tgl, jenis_transaksi: 'perpanjang' }]);
             tutupModal('modal-tempo'); loadHutang();
+        }
+
+        function tutupModal(id) { 
+            if(id === 'modal-edit') {
+                document.getElementById('input-bayar').value = '';
+                document.getElementById('input-keterangan').value = '';
+            }
+            document.getElementById(id).classList.add('hidden'); 
         }
 
         window.onload = loadHutang;
