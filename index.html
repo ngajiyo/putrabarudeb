@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manager Piutang Pro v5.4</title>
+    <title>Manager Piutang Pro v5.7</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
@@ -97,13 +97,16 @@
 
                 container.innerHTML += `
                     <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center animate-card ${isLunas ? 'opacity-50 grayscale bg-slate-50' : ''}">
-                        <div class="max-w-[55%]">
+                        <div class="max-w-[50%]">
                             <p class="font-bold text-slate-800 truncate uppercase tracking-tighter leading-tight">${row.nama_debitur}</p>
                             <p class="${isLunas ? 'text-slate-400' : 'text-red-500'} font-black italic">${isLunas ? 'LUNAS' : 'Rp '+row.sisa_hutang.toLocaleString('id-ID')}</p>
                             <div class="text-[9px] font-bold uppercase mt-1 tracking-tight text-slate-400">Tempo: ${tglDisplay} ${statusTempo}</div>
                         </div>
                         <div class="flex gap-2">
                             ${!isLunas ? `
+                                <button onclick="kirimWA('${row.nama_debitur}', '${row.sisa_hutang}', '${row.jatuh_tempo}', '${row.nomor_wa}')" class="bg-emerald-100 text-emerald-600 p-3 rounded-xl active:scale-90 transition-all">
+                                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.72.94 3.659 1.437 5.63 1.438h.004c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                </button>
                                 <button onclick="bukaTempo('${row.id}', '${row.nama_debitur}', '${row.jatuh_tempo || ''}')" class="bg-slate-100 text-slate-500 p-3 rounded-xl active:scale-90 transition-all">📅</button>
                                 <button onclick="bukaModal('${row.id}', '${row.nama_debitur}', ${row.sisa_hutang}, 'bayar')" class="bg-indigo-600 text-white px-5 py-3 rounded-xl text-xs font-black shadow-md active:scale-90 uppercase">Bayar</button>
                             ` : `
@@ -117,27 +120,18 @@
             document.getElementById('total-sisa').innerText = `Rp ${total.toLocaleString('id-ID')}`;
         }
 
-        // --- FUNGSI FILTER LOG ---
         async function loadLogs() {
             const container = document.getElementById('main-content');
             container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat Riwayat...</p>';
-            
-            const { data, error } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('dibuat_pada', { ascending: false });
-            if(error) return container.innerHTML = "Gagal memuat data.";
-            allLogs = data;
+            const { data } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('id', { ascending: false });
+            allLogs = data || [];
 
             container.innerHTML = `
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3 mb-4 animate-card">
                     <input type="text" id="f-nama" oninput="applyFilters()" placeholder="Cari nama debitur..." class="w-full p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
-                    <div class="flex gap-2">
-                        <div class="flex-1">
-                            <label class="text-[8px] font-bold text-slate-400 ml-1">MULAI</label>
-                            <input type="date" id="f-mulai" onchange="applyFilters()" class="w-full p-2 bg-slate-50 rounded-lg border border-slate-100 text-xs">
-                        </div>
-                        <div class="flex-1">
-                            <label class="text-[8px] font-bold text-slate-400 ml-1">SAMPAI</label>
-                            <input type="date" id="f-selesai" onchange="applyFilters()" class="w-full p-2 bg-slate-50 rounded-lg border border-slate-100 text-xs">
-                        </div>
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">Filter Berdasarkan Bulan</label>
+                        <input type="month" id="f-bulan" onchange="applyFilters()" class="w-full bg-transparent font-bold outline-none text-indigo-600">
                     </div>
                 </div>
                 <div id="log-list" class="space-y-3"></div>
@@ -147,26 +141,24 @@
 
         function applyFilters() {
             const nama = document.getElementById('f-nama').value.toLowerCase();
-            const mulai = document.getElementById('f-mulai').value;
-            const selesai = document.getElementById('f-selesai').value;
+            const bulanFilter = document.getElementById('f-bulan').value; // Format: "YYYY-MM"
 
-            const filtered = allLogs.filter(log => {
+            let filtered = allLogs.filter(log => {
                 const mNama = log.daftar_piutang?.nama_debitur.toLowerCase().includes(nama);
-                const tglLog = log.dibuat_pada.split('T')[0];
-                let mTgl = true;
-                if(mulai && selesai) mTgl = tglLog >= mulai && tglLog <= selesai;
-                else if(mulai) mTgl = tglLog >= mulai;
-                else if(selesai) mTgl = tglLog <= selesai;
-                return mNama && mTgl;
+                const tglLog = log.dibuat_pada.split('T')[0]; // Format: "YYYY-MM-DD"
+                const bulanLog = tglLog.substring(0, 7); // Potong jadi "YYYY-MM"
+                
+                let mBulan = true;
+                if(bulanFilter) mBulan = (bulanLog === bulanFilter);
+                
+                return mNama && mBulan;
             });
             renderLogItems(filtered);
         }
 
         function renderLogItems(data) {
             const list = document.getElementById('log-list');
-            if(data.length === 0) return list.innerHTML = '<p class="text-center py-10 text-slate-400 italic text-sm">Tidak ada riwayat</p>';
-            
-            list.innerHTML = '';
+            list.innerHTML = data.length ? '' : '<p class="text-center py-10 text-slate-400 italic text-sm">Tidak ada riwayat</p>';
             data.forEach(log => {
                 const j = (log.jenis_transaksi || 'bayar').toLowerCase();
                 const cfg = {
@@ -192,22 +184,38 @@
             });
         }
 
-        // --- MODAL & ACTION LOGIC ---
+        function kirimWA(nama, sisa, tempo, nomor) {
+            if (!nomor || nomor === 'null' || nomor === '') return alert("Nomor WA kosong!");
+            
+            let kalimatH = "";
+            const tglDisplay = tempo ? new Date(tempo).toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'}) : 'Segera';
+            
+            if (tempo) {
+                const today = new Date(); today.setHours(0,0,0,0);
+                const target = new Date(tempo); target.setHours(0,0,0,0);
+                const diffDays = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+
+                if (diffDays > 0) kalimatH = `*(H-${diffDays} hari lagi)*`;
+                else if (diffDays === 0) kalimatH = `*(HARI INI)*`;
+                else kalimatH = `*(Lewat ${Math.abs(diffDays)} hari)*`;
+            }
+
+            const pesan = encodeURIComponent(
+                `Halo *${nama}*,\n\n` +
+                `Mengingatkan sisa piutang Anda sebesar: *Rp ${parseInt(sisa).toLocaleString('id-ID')}*\n` +
+                `Jatuh tempo pada: *${tglDisplay}* ${kalimatH}\n\n` +
+                `Mohon segera melakukan pembayaran. Terima kasih.`
+            );
+            window.open(`https://wa.me/${nomor}?text=${pesan}`, '_blank');
+        }
+
         function bukaModal(id, nama, sisa, m) {
             selId = id; selSisa = sisa; mode = m;
             document.getElementById('modal-title').innerText = nama;
             const badge = document.getElementById('modal-mode-badge');
-            const btn = document.getElementById('btn-simpan');
-            
-            if(m === 'bayar') {
-                badge.innerText = "PEMBAYARAN";
-                badge.className = "text-[10px] px-3 py-1 rounded-full font-black bg-emerald-100 text-emerald-700 uppercase tracking-widest";
-                btn.className = "flex-1 py-4 bg-indigo-600 rounded-xl font-bold text-white shadow-lg active:scale-95";
-            } else {
-                badge.innerText = "TAMBAH HUTANG";
-                badge.className = "text-[10px] px-3 py-1 rounded-full font-black bg-red-100 text-red-700 uppercase tracking-widest";
-                btn.className = "flex-1 py-4 bg-red-600 rounded-xl font-bold text-white shadow-lg active:scale-95";
-            }
+            badge.innerText = m === 'bayar' ? "PEMBAYARAN" : "TAMBAH HUTANG";
+            badge.className = m === 'bayar' ? "text-[10px] px-3 py-1 rounded-full font-black bg-emerald-100 text-emerald-700 uppercase tracking-widest" : "text-[10px] px-3 py-1 rounded-full font-black bg-red-100 text-red-700 uppercase tracking-widest";
+            document.getElementById('btn-simpan').className = m === 'bayar' ? "flex-1 py-4 bg-indigo-600 rounded-xl font-bold text-white shadow-lg" : "flex-1 py-4 bg-red-600 rounded-xl font-bold text-white shadow-lg";
             document.getElementById('modal-edit').classList.remove('hidden');
         }
 
@@ -215,17 +223,15 @@
             const jml = parseInt(document.getElementById('input-bayar').value);
             const ket = document.getElementById('input-keterangan').value;
             if(!jml || jml <= 0) return alert("Nominal tidak valid!");
-            
             const sisaBaru = mode === 'tambah' ? selSisa + jml : selSisa - jml;
             await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: jml, keterangan: ket, jenis_transaksi: mode }]);
             await client.from('daftar_piutang').update({ sisa_hutang: sisaBaru }).eq('id', selId);
-            
             tutupModal('modal-edit'); loadHutang();
         }
 
         function bukaTempo(id, nama, tglLama) {
             selId = id; document.getElementById('tempo-title').innerText = nama;
-            document.getElementById('input-tempo').value = tglLama ? tglLama : "";
+            document.getElementById('input-tempo').value = tglLama || "";
             document.getElementById('modal-tempo').classList.remove('hidden');
         }
 
@@ -238,10 +244,8 @@
         }
 
         function tutupModal(id) { 
-            if(id === 'modal-edit') {
-                document.getElementById('input-bayar').value = '';
-                document.getElementById('input-keterangan').value = '';
-            }
+            document.getElementById('input-bayar').value = '';
+            document.getElementById('input-keterangan').value = '';
             document.getElementById(id).classList.add('hidden'); 
         }
 
