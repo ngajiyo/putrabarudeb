@@ -3,12 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manager Piutang Pro v5.7</title>
+    <title>Manager Piutang Pro v5.7 - Highlight Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-card { animation: fadeIn 0.3s ease-out; }
+        
+        /* Animasi khusus untuk yang lewat jatuh tempo */
+        @keyframes pulse-red {
+            0% { border-color: #fee2e2; }
+            50% { border-color: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
+            100% { border-color: #fee2e2; }
+        }
+        .border-overdue { 
+            animation: pulse-red 2s infinite; 
+            border-width: 2px !important;
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen pb-20">
@@ -38,8 +49,8 @@
                     <input type="number" id="input-bayar" class="w-full bg-transparent text-2xl font-black outline-none text-indigo-600" placeholder="0">
                 </div>
                 <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Keterangan</label>
-                    <input type="text" id="input-keterangan" class="w-full bg-transparent text-sm font-medium outline-none text-slate-600" placeholder="Catatan">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Keterangan Transaksi</label>
+                    <input type="text" id="input-keterangan" class="w-full bg-transparent text-sm font-medium outline-none text-slate-600" placeholder="Contoh: Cicilan ke-2">
                 </div>
             </div>
             <div class="flex gap-3 mt-8">
@@ -52,8 +63,15 @@
     <div id="modal-tempo" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 z-50">
         <div class="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-6 shadow-2xl animate-card">
             <h2 id="tempo-title" class="text-xl font-black text-slate-800 uppercase text-center mb-6">Ubah Jatuh Tempo</h2>
-            <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <input type="date" id="input-tempo" class="w-full bg-transparent text-xl font-bold outline-none text-indigo-600 mt-1">
+            <div class="space-y-4">
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tanggal Baru</label>
+                    <input type="date" id="input-tempo" class="w-full bg-transparent text-xl font-bold outline-none text-indigo-600 mt-1">
+                </div>
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Keterangan Perubahan</label>
+                    <input type="text" id="input-keterangan-tempo" class="w-full bg-transparent text-sm font-medium outline-none text-slate-600" placeholder="Contoh: Janji bayar tgl 10">
+                </div>
             </div>
             <div class="flex gap-3 mt-8">
                 <button onclick="tutupModal('modal-tempo')" class="flex-1 py-4 bg-slate-100 rounded-xl font-bold text-slate-500">Batal</button>
@@ -78,8 +96,18 @@
         async function loadHutang() {
             const container = document.getElementById('main-content');
             container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat...</p>';
-            const { data } = await client.from('daftar_piutang').select('*').order('nama_debitur');
-            data.sort((a, b) => (b.sisa_hutang > 0) - (a.sisa_hutang > 0));
+            
+            const { data } = await client.from('daftar_piutang').select('*');
+            
+            data.sort((a, b) => {
+                const isALunas = a.sisa_hutang <= 0;
+                const isBLunas = b.sisa_hutang <= 0;
+                if (isALunas !== isBLunas) return isALunas ? 1 : -1;
+                
+                const dateA = a.jatuh_tempo ? new Date(a.jatuh_tempo) : new Date(9999, 11, 31);
+                const dateB = b.jatuh_tempo ? new Date(b.jatuh_tempo) : new Date(9999, 11, 31);
+                return dateA - dateB;
+            });
             
             const today = new Date(); today.setHours(0,0,0,0);
             let total = 0; container.innerHTML = '';
@@ -90,13 +118,23 @@
                 const tglDisplay = row.jatuh_tempo ? new Date(row.jatuh_tempo).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'}) : 'Belum Atur';
                 
                 let statusTempo = "";
+                let overdueClass = "";
+                
                 if(row.jatuh_tempo && !isLunas) {
                     const diffDays = Math.ceil((new Date(row.jatuh_tempo).setHours(0,0,0,0) - today) / (1000*60*60*24));
-                    statusTempo = diffDays < 0 ? `<span class="text-red-600 font-black">[ Lewat ${Math.abs(diffDays)} h ]</span>` : (diffDays === 0 ? `<span class="text-orange-600 font-black">[ HARI INI ]</span>` : `<span class="text-blue-500">[ ${diffDays} h lagi ]</span>`);
+                    if (diffDays < 0) {
+                        statusTempo = `<span class="text-red-600 font-black">[ LEWAT ${Math.abs(diffDays)} HARI ]</span>`;
+                        overdueClass = "border-overdue bg-red-50"; // Highlight Merah
+                    } else if (diffDays === 0) {
+                        statusTempo = `<span class="text-orange-600 font-black">[ HARI INI ]</span>`;
+                        overdueClass = "border-orange-200 bg-orange-50";
+                    } else {
+                        statusTempo = `<span class="text-blue-500">[ ${diffDays} h lagi ]</span>`;
+                    }
                 }
 
                 container.innerHTML += `
-                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center animate-card ${isLunas ? 'opacity-50 grayscale bg-slate-50' : ''}">
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center animate-card ${overdueClass} ${isLunas ? 'opacity-50 grayscale bg-slate-50' : ''}">
                         <div class="max-w-[50%]">
                             <p class="font-bold text-slate-800 truncate uppercase tracking-tighter leading-tight">${row.nama_debitur}</p>
                             <p class="${isLunas ? 'text-slate-400' : 'text-red-500'} font-black italic">${isLunas ? 'LUNAS' : 'Rp '+row.sisa_hutang.toLocaleString('id-ID')}</p>
@@ -110,6 +148,7 @@
                                 <button onclick="bukaTempo('${row.id}', '${row.nama_debitur}', '${row.jatuh_tempo || ''}')" class="bg-slate-100 text-slate-500 p-3 rounded-xl active:scale-90 transition-all">📅</button>
                                 <button onclick="bukaModal('${row.id}', '${row.nama_debitur}', ${row.sisa_hutang}, 'bayar')" class="bg-indigo-600 text-white px-5 py-3 rounded-xl text-xs font-black shadow-md active:scale-90 uppercase">Bayar</button>
                             ` : `
+                                <button onclick="hapusDebitur('${row.id}', '${row.nama_debitur}')" class="bg-red-100 text-red-600 p-3 rounded-xl active:scale-90 transition-all">🗑️</button>
                                 <button onclick="bukaModal('${row.id}', '${row.nama_debitur}', 0, 'tambah')" class="bg-emerald-500 text-white px-4 py-3 rounded-xl text-xs font-black shadow-md active:scale-90 flex items-center gap-1">
                                     <span class="text-lg leading-none">+</span> HUTANG
                                 </button>
@@ -118,6 +157,15 @@
                     </div>`;
             });
             document.getElementById('total-sisa').innerText = `Rp ${total.toLocaleString('id-ID')}`;
+        }
+
+        async function hapusDebitur(id, nama) {
+            const yakin = confirm(`Hapus data "${nama}" secara permanen?`);
+            if (yakin) {
+                await client.from('log_transaksi').delete().eq('id_debitur', id);
+                await client.from('daftar_piutang').delete().eq('id', id);
+                loadHutang();
+            }
         }
 
         async function loadLogs() {
@@ -141,16 +189,11 @@
 
         function applyFilters() {
             const nama = document.getElementById('f-nama').value.toLowerCase();
-            const bulanFilter = document.getElementById('f-bulan').value; // Format: "YYYY-MM"
-
+            const bulanFilter = document.getElementById('f-bulan').value;
             let filtered = allLogs.filter(log => {
                 const mNama = log.daftar_piutang?.nama_debitur.toLowerCase().includes(nama);
-                const tglLog = log.dibuat_pada.split('T')[0]; // Format: "YYYY-MM-DD"
-                const bulanLog = tglLog.substring(0, 7); // Potong jadi "YYYY-MM"
-                
-                let mBulan = true;
-                if(bulanFilter) mBulan = (bulanLog === bulanFilter);
-                
+                const bulanLog = log.dibuat_pada.substring(0, 7);
+                let mBulan = bulanFilter ? (bulanLog === bulanFilter) : true;
                 return mNama && mBulan;
             });
             renderLogItems(filtered);
@@ -187,7 +230,7 @@
         function kirimWA(nama, sisa, tempo, nomor) {
             if (!nomor || nomor === 'null' || nomor === '') return alert("Nomor WA kosong!");
             
-            let kalimatH = "";
+            let statusPesan = "";
             const tglDisplay = tempo ? new Date(tempo).toLocaleDateString('id-ID', {day:'numeric', month:'long', year:'numeric'}) : 'Segera';
             
             if (tempo) {
@@ -195,16 +238,23 @@
                 const target = new Date(tempo); target.setHours(0,0,0,0);
                 const diffDays = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
 
-                if (diffDays > 0) kalimatH = `*(H-${diffDays} hari lagi)*`;
-                else if (diffDays === 0) kalimatH = `*(HARI INI)*`;
-                else kalimatH = `*(Lewat ${Math.abs(diffDays)} hari)*`;
+                if (diffDays < 0) {
+                    // Kalimat jika sudah jatuh tempo (Overdue)
+                    statusPesan = `*PERINGATAN: PEMBAYARAN SUDAH JATUH TEMPO!* ⚠️\n` +
+                                 `Mohon maaf, kewajiban Anda sebesar *Rp ${parseInt(sisa).toLocaleString('id-ID')}* telah melewati batas waktu pada tanggal *${tglDisplay}* (Terlambat ${Math.abs(diffDays)} hari).`;
+                } else if (diffDays === 0) {
+                    statusPesan = `*PEMBERITAHUAN: JATUH TEMPO HARI INI!* 🔔\n` +
+                                 `Mengingatkan bahwa hari ini adalah batas akhir pembayaran piutang Anda sebesar *Rp ${parseInt(sisa).toLocaleString('id-ID')}*.`;
+                } else {
+                    statusPesan = `Halo *${nama}*, sekedar mengingatkan sisa piutang Anda sebesar *Rp ${parseInt(sisa).toLocaleString('id-ID')}* yang akan jatuh tempo pada *${tglDisplay}* (${diffDays} hari lagi).`;
+                }
+            } else {
+                statusPesan = `Halo *${nama}*, kami informasikan sisa piutang Anda saat ini adalah sebesar *Rp ${parseInt(sisa).toLocaleString('id-ID')}*. Mohon kesediaannya untuk segera melakukan penyelesaian.`;
             }
 
             const pesan = encodeURIComponent(
-                `Halo *${nama}*,\n\n` +
-                `Mengingatkan sisa piutang Anda sebesar: *Rp ${parseInt(sisa).toLocaleString('id-ID')}*\n` +
-                `Jatuh tempo pada: *${tglDisplay}* ${kalimatH}\n\n` +
-                `Mohon segera melakukan pembayaran. Terima kasih.`
+                `${statusPesan}\n\n` +
+                `Mohon segera melakukan konfirmasi atau pembayaran. Abaikan pesan ini jika Anda sudah melunasinya. Terima kasih.`
             );
             window.open(`https://wa.me/${nomor}?text=${pesan}`, '_blank');
         }
@@ -230,22 +280,32 @@
         }
 
         function bukaTempo(id, nama, tglLama) {
-            selId = id; document.getElementById('tempo-title').innerText = nama;
+            selId = id; 
+            document.getElementById('tempo-title').innerText = nama;
             document.getElementById('input-tempo').value = tglLama || "";
+            document.getElementById('input-keterangan-tempo').value = "";
             document.getElementById('modal-tempo').classList.remove('hidden');
         }
 
         async function updateTempo() {
             const tgl = document.getElementById('input-tempo').value;
+            const ket = document.getElementById('input-keterangan-tempo').value;
             if(!tgl) return alert("Pilih tanggal!");
+            
             await client.from('daftar_piutang').update({ jatuh_tempo: tgl }).eq('id', selId);
-            await client.from('log_transaksi').insert([{ id_debitur: selId, nominal: 0, keterangan: 'Ubah Tempo ke ' + tgl, jenis_transaksi: 'perpanjang' }]);
+            await client.from('log_transaksi').insert([{ 
+                id_debitur: selId, 
+                nominal: 0, 
+                keterangan: ket || ('Ubah Tempo ke ' + tgl), 
+                jenis_transaksi: 'perpanjang' 
+            }]);
             tutupModal('modal-tempo'); loadHutang();
         }
 
         function tutupModal(id) { 
             document.getElementById('input-bayar').value = '';
             document.getElementById('input-keterangan').value = '';
+            document.getElementById('input-keterangan-tempo').value = '';
             document.getElementById(id).classList.add('hidden'); 
         }
 
