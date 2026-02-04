@@ -172,7 +172,14 @@
                                     <p class="font-bold text-slate-800 truncate uppercase tracking-tighter leading-tight">${row.nama_debitur}</p>
                                     <button onclick="bukaProfil('${row.id}', '${row.nama_debitur}', '${row.nomor_wa || ''}')" class="text-slate-300 hover:text-indigo-500 transition-colors">✏️</button>
                                 </div>
-                                <p class="${isLunas ? 'text-slate-400' : 'text-red-500'} font-black italic">${isLunas ? 'LUNAS' : 'Rp '+row.sisa_hutang.toLocaleString('id-ID')}</p>
+                                <div class="flex items-baseline gap-2">
+                                    <p class="${isLunas ? 'text-slate-400' : 'text-red-500'} font-black italic">
+                                        ${isLunas ? 'LUNAS' : 'Rp '+row.sisa_hutang.toLocaleString('id-ID')}
+                                    </p>
+                                    <span class="text-[10px] text-slate-400 font-medium truncate italic">
+                                        ${row.keterangan ? '• ' + row.keterangan : ''}
+                                    </span>
+                                </div>
                                 <div class="text-[9px] font-bold uppercase mt-1 tracking-tight text-slate-400">Tempo: ${tglDisplay} ${statusTempo}</div>
                             </div>
                             <div class="flex gap-1.5">
@@ -195,7 +202,6 @@
             document.getElementById('total-sisa').innerText = `Rp ${total.toLocaleString('id-ID')}`;
         }
 
-        // FUNGSI EDIT PROFIL (BARU)
         function bukaProfil(id, nama, wa) {
             selId = id;
             document.getElementById('edit-nama-debitur').value = nama;
@@ -207,17 +213,11 @@
             const baruNama = document.getElementById('edit-nama-debitur').value;
             const baruWa = document.getElementById('edit-wa-debitur').value;
             if(!baruNama) return alert("Nama tidak boleh kosong!");
-
-            await client.from('daftar_piutang').update({ 
-                nama_debitur: baruNama, 
-                nomor_wa: baruWa 
-            }).eq('id', selId);
-
+            await client.from('daftar_piutang').update({ nama_debitur: baruNama, nomor_wa: baruWa }).eq('id', selId);
             tutupModal('modal-profil');
             loadHutang();
         }
 
-        // FUNGSI PENUNJANG TETAP SAMA
         async function hapusDebitur(id, nama) {
             if (confirm(`Hapus data "${nama}" secara permanen?`)) {
                 await client.from('log_transaksi').delete().eq('id_debitur', id);
@@ -229,7 +229,8 @@
         async function loadLogs() {
             const container = document.getElementById('main-content');
             container.innerHTML = '<p class="text-center py-10 text-slate-400 italic">Memuat...</p>';
-            const { data } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('id', { ascending: false });
+            // URUTKAN BERDASARKAN dibuat_pada DESCENDING
+            const { data } = await client.from('log_transaksi').select('*, daftar_piutang(nama_debitur)').order('dibuat_pada', { ascending: false });
             allLogs = data || [];
             container.innerHTML = `
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3 mb-4 animate-card">
@@ -289,6 +290,22 @@
         function bukaModal(id, nama, sisa, m) {
             selId = id; selSisa = sisa; mode = m;
             document.getElementById('modal-title').innerText = nama;
+            
+            const btnSimpan = document.getElementById('btn-simpan');
+            const badge = document.getElementById('modal-mode-badge');
+            
+            if (m === 'bayar') {
+                btnSimpan.className = "flex-1 py-4 rounded-xl font-bold text-white shadow-lg bg-indigo-600 active:scale-95 transition-all";
+                btnSimpan.innerText = "Simpan Pembayaran";
+                badge.className = "text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest bg-indigo-100 text-indigo-700";
+                badge.innerText = "MODE BAYAR";
+            } else {
+                btnSimpan.className = "flex-1 py-4 rounded-xl font-bold text-white shadow-lg bg-emerald-600 active:scale-95 transition-all";
+                btnSimpan.innerText = "Tambah Hutang";
+                badge.className = "text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest bg-emerald-100 text-emerald-700";
+                badge.innerText = "MODE TAMBAH";
+            }
+            
             document.getElementById('modal-edit').classList.remove('hidden');
         }
 
@@ -317,7 +334,11 @@
         }
 
         function tutupModal(id) { 
-            document.getElementById(id).classList.add('hidden'); 
+            document.getElementById(id).classList.add('hidden');
+            if(id === 'modal-edit') {
+                document.getElementById('input-bayar').value = "";
+                document.getElementById('input-keterangan').value = "";
+            }
         }
 
         window.onload = loadHutang;
